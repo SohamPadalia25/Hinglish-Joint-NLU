@@ -1,0 +1,117 @@
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+}
+
+.used {
+  border-color: #b8cdf3;
+  background: var(--accent-soft);
+}
+
+.unused {
+  background: var(--surface-alt);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 11px;
+  border-radius: 999px;
+}
+
+.badgeYes {
+  background: var(--accent);
+  color: #fff;
+}
+
+.badgeNo {
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+}
+
+.summary {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.previous {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #cddcf6;
+}
+
+.previousLabel {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid #c3d5f5;
+  color: var(--accent-dark);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.intentChip {
+  font-family: var(--font);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+
+.toggle {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-dark);
+  text-decoration: underline;
+}
+
+.reason {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}

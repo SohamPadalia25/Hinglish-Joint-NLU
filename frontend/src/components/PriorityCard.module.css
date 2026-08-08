@@ -1,0 +1,91 @@
+.card {
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+  border-left-width: 4px;
+  padding: 11px 13px;
+}
+
+.main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.heading {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.routing {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.scoreRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.scoreLabel {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.scoreValue {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  width: var(--fill, 0%);
+  border-radius: 999px;
+  background: currentColor;
+  transition: width 0.3s ease;
+}
+
+/* Colour is class-driven; only the bar width is dynamic. */
+.high {
+  color: var(--high);
+  background: var(--high-soft);
+  border-color: var(--high);
+}
+
+.medium {
+  color: var(--medium);
+  background: var(--medium-soft);
+  border-color: var(--medium);
+}
+
+.low {
+  color: var(--low);
+  background: var(--low-soft);
+  border-color: var(--low);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+}

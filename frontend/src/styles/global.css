@@ -1,0 +1,112 @@
+/* Design tokens and base layout. Component styling lives in *.module.css. */
+
+:root {
+  --bg: #eef2f7;
+  --surface: #ffffff;
+  --surface-alt: #f8fafc;
+  --border: #dde5ee;
+  --border-strong: #c7d3e2;
+
+  --text: #16202c;
+  --text-muted: #5b6b80;
+  --text-faint: #8695a8;
+
+  --accent: #2c5fd6;
+  --accent-dark: #1f47a5;
+  --accent-soft: #e8effc;
+
+  --high: #c62828;
+  --high-soft: #fdecec;
+  --medium: #b26a00;
+  --medium-soft: #fdf3e2;
+  --low: #1b7a43;
+  --low-soft: #e8f6ee;
+
+  --negative: #c62828;
+  --negative-soft: #fdecec;
+  --neutral: #4a5a70;
+  --neutral-soft: #eef2f7;
+  --positive: #1b7a43;
+  --positive-soft: #e8f6ee;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(20, 35, 60, 0.07), 0 1px 2px rgba(20, 35, 60, 0.04);
+
+  --font: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100%;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- shared primitives ---------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 6px;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* Screen-reader-only text for context that icons/colour alone would carry. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

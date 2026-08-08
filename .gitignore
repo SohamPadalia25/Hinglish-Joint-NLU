@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+# Model weights
+# ---------------------------------------------------------------------------
+# best_model.pt and hinglish_joint_model1.pt are ~2.14 GB each. GitHub rejects
+# any file over 100 MB, and both exceed the 2 GiB Release-asset limit too, so
+# they cannot live in this repository under any configuration.
+#
+# See README section "Obtaining the checkpoint" for how to get best_model.pt.
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+develop-eggs/
+.installed.cfg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---------------------------------------------------------------------------
+# Node / frontend
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Environment files
+# ---------------------------------------------------------------------------
+# .env.example IS committed; the real .env is not.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Runtime artefacts
+# ---------------------------------------------------------------------------
+*.log
+test_results.csv
+my_test_results.csv
