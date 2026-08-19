@@ -1,15 +1,23 @@
-"""Deterministic, template-based reply generation.
+"""Deterministic, template-based reply generation - in natural Hinglish.
 
 Consumes the structured result from `NLUPipeline.process_message` and turns it
 into an agent-facing reply. No model is called here, no external LLM is required,
 and the same input always produces the same output.
 
-The hard rule this module is built around: **the generator may only restate what
-the pipeline actually extracted.** It never states an order status, a refund or
-delivery date, an amount, a transaction outcome, an account detail or a policy.
-Where a fact is needed and missing, it asks the user for it instead.
+Replies are written in Roman-script Hinglish, the way an Indian support agent
+actually speaks: conversational Hindi carrying the sentence, with the ordinary
+English support vocabulary (order, payment, refund, status, priority, callback)
+left in English because that is what people really say. The templates are not
+mechanical translations of the earlier English ones - each was rewritten so the
+sentence sounds spoken rather than converted. No Devanagari, no formal register
+("mahoday", "bhugtan"), no word-for-word Hindi.
 
-Two mechanisms enforce that:
+The hard rule this module is built around is unchanged: **the generator may only
+restate what the pipeline actually extracted.** It never states an order status,
+a refund or delivery date, an amount, a transaction outcome, an account detail or
+a policy. Where a fact is needed and missing, it asks the user for it instead.
+
+Two mechanisms enforce that, and both survive the language change:
 
 * Every template string is fact-free and contains no digits. Anything concrete in
   a reply came from a slot value, verbatim.
@@ -18,15 +26,20 @@ Two mechanisms enforce that:
   values blindly would produce nonsense; identifier- and quantity-like slots must
   contain a digit to be quoted at all. A dropped slot is simply not mentioned -
   it is never repaired from the raw message.
+
+Routing language is deliberately careful. The system routes; it does not raise
+tickets. So a reply says a case has been marked high priority and routed to a
+human agent - both of which the priority engine really did - and never claims a
+ticket was created or an agent has been assigned.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # Disposition of a generated reply. Precedence is resolved in `_response_type`.
+# Unchanged from the English implementation - only the wording moved to Hinglish.
 RESPONSE_TYPES = (
     "ESCALATION",           # going to a human now
     "CALLBACK",             # a call-back was requested
@@ -51,10 +64,12 @@ DIGIT_REQUIRED_SLOTS = frozenset({
     "BUDGET", "DISCOUNT", "CHARGE", "WAIT_TIME",
 })
 
+# Slot labels stay in English - "order ID" and "amount" are what a Hinglish
+# speaker says out loud, and translating them would read as stilted.
 SLOT_DISPLAY_NAMES: Mapping[str, str] = {
     "ORDER_ID": "order ID",
     "AMOUNT": "amount",
-    "ACTUAL_AMOUNT": "amount charged",
+    "ACTUAL_AMOUNT": "charge hui amount",
     "PAYMENT_METHOD": "payment method",
     "PAYMENT_TYPE": "payment type",
     "PRODUCT_NAME": "product",
@@ -68,16 +83,23 @@ SLOT_DISPLAY_NAMES: Mapping[str, str] = {
     "ISSUE": "issue",
 }
 
+# Empathy line, used only where it belongs. It is a standalone sentence rather
+# than a comma-prefix because "Sorry, aap refund request karna chahte hain" reads
+# wrong - the apology is about the situation, not about what the user asked for.
+# Neutral and positive turns need no separate opener; their lead word carries the
+# tone. Exactly one apology per reply - the brief warns against piling them up.
 SENTIMENT_OPENERS: Mapping[str, str] = {
-    "NEGATIVE": "I'm sorry for the trouble this has caused.",
-    "NEUTRAL": "Thanks for getting in touch.",
-    "POSITIVE": "Thank you for the kind words!",
+    "NEGATIVE": "Sorry, aapko is wajah se pareshani hui.",
+    "NEUTRAL": "",
+    "POSITIVE": "",
 }
 
-URGENT_OPENERS: Mapping[str, str] = {
-    "NEGATIVE": "I'm really sorry about this, and I understand it needs urgent attention.",
-    "NEUTRAL": "Thanks for flagging this - I can see it needs prompt attention.",
-    "POSITIVE": "Thank you for the kind words!",
+# Lead word for the acknowledgement sentence. The acknowledgement itself is a
+# lower-case clause written to follow this and a comma.
+ACKNOWLEDGEMENT_LEADS: Mapping[str, str] = {
+    "NEGATIVE": "Samajh gaya",
+    "NEUTRAL": "Samajh gaya",     # direct and professional
+    "POSITIVE": "Thank you",      # warm
 }
 
 DEFAULT_SENTIMENT = "NEUTRAL"
@@ -85,13 +107,14 @@ DEFAULT_SENTIMENT = "NEUTRAL"
 
 @dataclass(frozen=True)
 class IntentStrategy:
-    """How one intent is answered.
+    """How one intent is answered, in Hinglish.
 
     Attributes:
-        summary: what we understood, phrased as a restatement of the user's own
-            message. Never a claim about system state.
-        action: what support can do next. Phrased as capability ("we can check"),
-            never as a completed outcome ("your refund is processed").
+        acknowledgement: a lower-case clause completing "<prefix>, ...". States
+            what the user said back to them, never a claim about system state.
+        action: what support can do next. Phrased as capability ("check karne
+            mein help karta hoon"), never as a completed outcome ("aapka refund
+            ho gaya hai").
         response_type: the disposition when no override applies.
         helpful_slots: slot types that would let support act. When none of these
             are available - freshly extracted or carried in from context - the
@@ -99,7 +122,7 @@ class IntentStrategy:
         ask: the question to ask when `helpful_slots` are missing.
     """
 
-    summary: str
+    acknowledgement: str
     action: str
     response_type: str
     helpful_slots: Tuple[str, ...] = ()
@@ -107,123 +130,138 @@ class IntentStrategy:
 
 
 # One strategy per intent label in model_metadata2.json. No template contains a
-# digit, a date, a status or a policy statement - see test_no_invented_numbers.
+# digit, a date, a status or a policy statement - see test_no_template_contains_a_digit.
 INTENT_STRATEGIES: Mapping[str, IntentStrategy] = {
     "COMPLAINT_BILLING": IntentStrategy(
-        summary="there's a problem with the way you've been billed",
-        action="We can review the charges on your account and get any billing error corrected.",
+        acknowledgement="aapki billing mein kuch galat charge hua hai",
+        action="Main aapke account ke charges review karke billing error correct "
+               "karwane mein aapki help karta hoon.",
         response_type="ACKNOWLEDGEMENT",
         helpful_slots=("ORDER_ID", "AMOUNT", "ACTUAL_AMOUNT"),
-        ask="Could you share the order ID or invoice number, and the amount you were charged?",
+        ask="Please apna order ID ya invoice number aur jo amount charge hui hai "
+            "wo share kar dijiye.",
     ),
     "COMPLAINT_DELIVERY": IntentStrategy(
-        summary="your order hasn't reached you as expected",
-        action="We can check the shipment with the courier and chase up the delivery.",
+        acknowledgement="aapka order abhi tak deliver nahi hua hai",
+        action="Main courier ke saath shipment check karke delivery follow up "
+               "karne mein aapki help karta hoon.",
         response_type="ACKNOWLEDGEMENT",
         helpful_slots=("ORDER_ID",),
-        ask="Could you share your order ID so we can pull up the shipment?",
+        ask="Please apna order ID share kar dijiye taaki hum shipment track kar sakein.",
     ),
     "COMPLAINT_PRODUCT": IntentStrategy(
-        summary="the product you received isn't up to the mark",
-        action="We can review the item and arrange a replacement or a return.",
+        acknowledgement="jo product aapko mila wo theek nahi nikla",
+        action="Main item review karwa ke replacement ya return arrange karne mein "
+               "aapki help karta hoon.",
         response_type="ACKNOWLEDGEMENT",
         helpful_slots=("ORDER_ID", "PRODUCT_NAME", "ITEM"),
-        ask="Could you share the order ID and a photo of the item you received?",
+        ask="Please apna order ID aur item ki ek photo share kar dijiye.",
     ),
     "COMPLAINT_SERVICE": IntentStrategy(
-        summary="the support you've received so far hasn't been good enough",
-        action="We'll review how this was handled and make sure it's picked up properly.",
+        acknowledgement="aapko ab tak jo support mila wo theek nahi tha",
+        action="Main check karwata hoon ki ye case kaise handle hua, aur isse "
+               "sahi tarike se aage badhwata hoon.",
         response_type="ACKNOWLEDGEMENT",
         helpful_slots=("ORDER_ID",),
-        ask="If you have a previous complaint or ticket reference, sharing it will help us trace it.",
+        ask="Agar aapke paas pichhli complaint ya ticket reference hai to please "
+            "share kar dijiye, usse trace karna aasan ho jayega.",
     ),
     "FEEDBACK_NEGATIVE": IntentStrategy(
-        summary="your experience with us hasn't been a good one",
-        action="Your feedback is noted and passed on to the team responsible.",
+        acknowledgement="aapka experience humare saath achha nahi raha",
+        action="Aapka feedback note kar liya gaya hai aur related team tak "
+               "pahunchaya jayega.",
         response_type="APOLOGY",
         helpful_slots=("ORDER_ID",),
-        ask="If there's a particular order or interaction behind this, tell me and I'll have it looked into.",
+        ask="Agar iske peeche koi specific order ya interaction hai to bataiye, "
+            "main usse check karwata hoon.",
     ),
     "FEEDBACK_POSITIVE": IntentStrategy(
-        summary="you're happy with how things went",
-        action="I'll pass this on to the team - it genuinely means a lot to them.",
+        acknowledgement="aapka feedback humare liye bahut important hai",
+        action="Main ye team tak zaroor pahunchata hoon - unhe sunkar bahut achha lagega.",
         response_type="APPRECIATION",
     ),
     "PAYMENT_ISSUE": IntentStrategy(
-        summary="your payment didn't go through the way it should have",
-        action="We can help you check the payment and the order status, and get a deducted or failed payment traced.",
+        acknowledgement="aapki payment theek se process nahi hui",
+        action="Main payment aur order status dono check karne mein aapki help "
+               "karta hoon, aur deduct hui ya fail hui payment trace karwa sakta hoon.",
         response_type="ACKNOWLEDGEMENT",
         helpful_slots=("ORDER_ID", "AMOUNT", "PAYMENT_METHOD"),
-        ask="Could you share the order ID and the payment or UPI reference from your bank?",
+        ask="Please apna order ID aur bank ka payment ya UPI reference share kar dijiye.",
     ),
     "QUERY_ORDER_STATUS": IntentStrategy(
-        summary="you'd like an update on your order",
-        action="I can get the current status looked up for you.",
+        acknowledgement="aap apne order ka update chahte hain",
+        action="Main aapke order ka current status check karne mein help karta hoon.",
         response_type="INFORMATION",
         helpful_slots=("ORDER_ID",),
-        ask="Could you share your order ID?",
+        ask="Please apna order ID share kar dijiye.",
     ),
     "QUERY_PRODUCT_INFO": IntentStrategy(
-        summary="you'd like more details about a product",
-        action="I can share the specifications, availability and pricing we have on record.",
+        acknowledgement="aap kisi product ke baare mein details chahte hain",
+        action="Main aapko us product ki specifications, availability aur pricing "
+               "bata sakta hoon jo humare record mein hai.",
         response_type="INFORMATION",
         helpful_slots=("PRODUCT_NAME", "PRODUCT_TYPE", "ITEM"),
-        ask="Which product would you like to know about?",
+        ask="Please bataiye aap kaunse product ke baare mein jaanna chahte hain.",
     ),
     "QUERY_REFUND_STATUS": IntentStrategy(
-        summary="you'd like to know where your refund has reached",
-        action="I can get the refund checked against your order and tell you where it stands.",
+        acknowledgement="aap jaanna chahte hain ki aapka refund kahan tak pahuncha hai",
+        action="Main aapke order ke against refund check karke bata sakta hoon ki "
+               "wo abhi kis stage par hai.",
         response_type="INFORMATION",
         helpful_slots=("ORDER_ID",),
-        ask="Could you share the order ID the refund relates to?",
+        ask="Please us order ka order ID share kar dijiye jiska refund hai.",
     ),
     "REQUEST_CALLBACK": IntentStrategy(
-        summary="you'd like someone from our team to call you",
-        action="I've noted your callback request and passed it to the support team.",
+        acknowledgement="aap chahte hain ki humari team aapko call kare",
+        action="Aapki callback request note kar li gayi hai aur support team ke "
+               "liye route kar di gayi hai.",
         response_type="CALLBACK",
         helpful_slots=("CONTACT",),
-        ask="Could you confirm the number to call and a time window that suits you?",
+        ask="Please confirm kar dijiye ki kis number par call karna hai aur kaunsa "
+            "time aapke liye convenient rahega.",
     ),
     "REQUEST_CANCEL": IntentStrategy(
-        summary="you'd like to cancel your order",
-        action="We can put a cancellation request through once the order is confirmed.",
+        acknowledgement="aap apna order cancel karna chahte hain",
+        action="Order confirm hote hi hum cancellation request process kar sakte hain.",
         response_type="ACTION_CONFIRMATION",
         helpful_slots=("ORDER_ID",),
-        ask="Could you share the order ID you'd like cancelled?",
+        ask="Please wo order ID share kar dijiye jise aap cancel karna chahte hain.",
     ),
     "REQUEST_ESCALATE": IntentStrategy(
-        summary="you'd like this taken further",
-        action="I'm escalating this to a senior support specialist.",
+        acknowledgement="aapko is issue ko aage escalate karna pada",
+        action="Main ise senior support specialist ke liye escalate kar raha hoon.",
         response_type="ESCALATION",
         helpful_slots=("ORDER_ID",),
-        ask="If you have an order ID or an earlier complaint reference, sharing it will speed this up.",
+        ask="Agar aapke paas order ID ya pehle ki koi complaint reference hai to "
+            "please share kar dijiye, isse kaafi tezi aa jayegi.",
     ),
     "REQUEST_REFUND": IntentStrategy(
-        summary="you'd like a refund",
-        action="We can raise a refund request and have it reviewed against your order.",
+        acknowledgement="aap refund request karna chahte hain",
+        action="Main refund request raise karke usse aapke order ke against review "
+               "karwane mein help karta hoon.",
         response_type="ACTION_CONFIRMATION",
         helpful_slots=("ORDER_ID", "AMOUNT"),
-        ask="Could you share the order ID and what went wrong, so we can raise the request?",
+        ask="Please apna order ID aur refund ki reason share kar dijiye.",
     ),
     "RETURN_REQUEST": IntentStrategy(
-        summary="you'd like to return the item",
-        action="We can start a return and arrange a pickup once the order is confirmed.",
+        acknowledgement="aap product return karna chahte hain",
+        action="Order confirm hote hi hum return start karke pickup arrange kar sakte hain.",
         response_type="ACTION_CONFIRMATION",
         helpful_slots=("ORDER_ID", "PRODUCT_NAME", "ITEM"),
-        ask="Could you share the order ID and what's wrong with the item?",
+        ask="Please apna order ID aur item mein kya problem hai wo bata dijiye.",
     ),
 }
 
 FALLBACK_STRATEGY = IntentStrategy(
-    summary="you need some help",
-    action="I want to make sure this reaches the right place.",
+    acknowledgement="aapko kisi cheez mein help chahiye",
+    action="Main chahta hoon ki aapki ye request sahi jagah pahunche.",
     response_type="FALLBACK",
-    ask="Could you tell me a little more about what you need help with?",
+    ask="Please thoda aur detail mein bataiye ki aapko kis cheez mein help chahiye.",
 )
 
 
 class ResponseGenerator:
-    """Turns a pipeline result into a reply.
+    """Turns a pipeline result into a Hinglish reply.
 
     Deterministic and offline: no network call, no LLM, no randomness.
 
@@ -322,11 +360,11 @@ class ResponseGenerator:
 
     @classmethod
     def _describe_all(cls, slots: Sequence[Mapping[str, Any]]) -> str:
-        """Comma-separated, with 'and' before the last - reads as a sentence."""
+        """Comma-separated, joined with "aur" before the last."""
         described = [cls._describe(s) for s in slots]
         if len(described) == 1:
             return described[0]
-        return ", ".join(described[:-1]) + f" and the {described[-1]}"
+        return ", ".join(described[:-1]) + f" aur {described[-1]}"
 
     # -------------------------------------------------------------- assembly
 
@@ -340,19 +378,19 @@ class ResponseGenerator:
         needs_detail: bool,
         requires_human: bool,
     ) -> str:
-        openers = URGENT_OPENERS if priority_label == "HIGH" else SENTIMENT_OPENERS
+        lead = ACKNOWLEDGEMENT_LEADS.get(sentiment, ACKNOWLEDGEMENT_LEADS[DEFAULT_SENTIMENT])
         parts = [
-            openers.get(sentiment, openers[DEFAULT_SENTIMENT]),
-            f"I understand that {strategy.summary}.",
+            SENTIMENT_OPENERS.get(sentiment, ""),
+            f"{lead}, {strategy.acknowledgement}.",
         ]
 
         if own_slots:
-            parts.append(f"I've noted the {self._describe_all(own_slots)}.")
+            parts.append(f"Maine {self._describe_all(own_slots)} note kar liya hai.")
 
         if inherited:
             parts.append(
-                f"I'm carrying forward the {self._describe_all(inherited)} "
-                "from your earlier message."
+                f"Main aapke pichhle message se {self._describe_all(inherited)} "
+                "aage use kar raha hoon."
             )
 
         parts.append(strategy.action)
@@ -365,13 +403,20 @@ class ResponseGenerator:
 
     @staticmethod
     def _closer(priority_label: str, requires_human: bool) -> str:
+        """Closing line.
+
+        Routing language only: the priority engine really did mark the case and
+        pick a routing target, so saying so is accurate. Nothing here claims a
+        ticket was raised or an agent assigned, because the system does neither.
+        """
         if priority_label == "HIGH":
-            return "I've marked this as high priority and a support specialist will pick it up."
+            return ("Aapke is issue ko high priority par mark kiya gaya hai aur "
+                    "human support agent ke liye route kiya gaya hai.")
         if requires_human:
-            return "I've passed this to our support team so someone can get back to you."
+            return "Ye request human support agent ke liye route ki gayi hai."
         if priority_label == "LOW":
-            return "Happy to help with anything else right here."
-        return "Our support team will follow this up with you."
+            return "Aur kuch chahiye to bataiye, main yahin help kar deta hoon."
+        return "Main is issue ko support team ke follow-up ke liye note kar raha hoon."
 
     # ------------------------------------------------------------ disposition
 

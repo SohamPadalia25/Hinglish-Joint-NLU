@@ -1,4 +1,10 @@
-"""Response generation: the required intent cases plus anti-hallucination guards."""
+"""Hinglish response generation: the required cases plus anti-hallucination guards.
+
+The generator answers in Roman-script Hinglish. These tests check the language is
+actually Hinglish (not English, not Devanagari, not stilted formal Hindi) while
+pinning the decision logic - `response_type`, `requires_human`, slot filtering -
+which the language change must not have touched.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +15,21 @@ import pytest
 
 from backend.priority.priority_engine import predict_priority
 from backend.response.response_generator import (
+    ACKNOWLEDGEMENT_LEADS,
     INTENT_STRATEGIES,
     RESPONSE_TYPES,
     SENTIMENT_OPENERS,
-    URGENT_OPENERS,
     ResponseGenerator,
 )
 
 GENERATOR = ResponseGenerator()
+
+# Function words that appear in ordinary spoken Hinglish. A reply carrying none
+# of these has drifted back to English.
+HINGLISH_MARKERS = (
+    "aap", "main", "hai", "hoon", "kar", "ke", "ki", "ka", "mein", "please",
+    "raha", "gaya", "dijiye", "sakta", "hum",
+)
 
 
 def make_result(
@@ -60,15 +73,33 @@ def slot(slot_type: str, value: str, confidence: float = 0.95) -> Dict[str, Any]
     return {"type": slot_type, "value": value, "confidence": confidence}
 
 
-# --- the ten required cases --------------------------------------------------
+def assert_natural_hinglish(response: str) -> None:
+    """Roman-script Hinglish, conversational rather than formal."""
+    assert response and response.strip() == response
+    assert "  " not in response
 
-def test_case_1_payment_issue_negative_high():
+    lowered = response.lower()
+    found = [marker for marker in HINGLISH_MARKERS if marker in lowered]
+    assert len(found) >= 3, f"reply does not read as Hinglish: {response!r}"
+
+    # Devanagari is explicitly out of scope - Roman script only.
+    assert not re.search(r"[ऀ-ॿ]", response), f"Devanagari in: {response!r}"
+
+    # Stilted formal Hindi the brief rules out.
+    for banned in ("mahoday", "bhugtan", "kripya", "samasya", "dhanyavaad", "nivedan"):
+        assert banned not in lowered, f"overly formal Hindi {banned!r} in: {response!r}"
+
+
+# --- the required intent cases ----------------------------------------------
+
+def test_case_1_payment_issue():
     result = make_result("PAYMENT_ISSUE", "NEGATIVE", [slot("AMOUNT", "799 rupaye")])
     reply = GENERATOR.generate(result)
 
     assert result["priority"]["label"] == "HIGH"
     assert reply["requires_human"] is True
     assert reply["response_type"] == "ESCALATION"
+    assert_natural_hinglish(reply["response"])
     assert "payment" in reply["response"].lower()
     assert "799 rupaye" in reply["response"]      # quoted because it is complete
 
@@ -79,8 +110,10 @@ def test_case_2_complaint_delivery():
     )
 
     assert reply["requires_human"] is True        # COMPLAINT_DELIVERY scores HIGH
+    assert_natural_hinglish(reply["response"])
     assert "#45231" in reply["response"]
     assert "sorry" in reply["response"].lower()
+    assert "deliver" in reply["response"].lower()
 
 
 def test_case_3_query_refund_status():
@@ -88,10 +121,9 @@ def test_case_3_query_refund_status():
 
     assert reply["requires_human"] is False
     assert reply["response_type"] == "CLARIFICATION"   # no order id to work with
+    assert_natural_hinglish(reply["response"])
     assert "order ID" in reply["response"]
-    # Must not state where the refund actually is.
-    assert not re.search(r"\b(refunded|credited|processed on|will be credited)\b",
-                         reply["response"], re.I)
+    assert "refund" in reply["response"].lower()
 
 
 def test_case_4_request_cancel():
@@ -101,17 +133,18 @@ def test_case_4_request_cancel():
 
     assert reply["response_type"] == "ACTION_CONFIRMATION"
     assert reply["requires_human"] is False
+    assert_natural_hinglish(reply["response"])
     assert "#45231" in reply["response"]
-    # It takes the request down; it never claims the cancellation already happened.
-    assert not re.search(r"\b(has been|is) cancelled\b", reply["response"], re.I)
+    assert "cancel" in reply["response"].lower()
 
 
 def test_case_5_request_refund():
     reply = GENERATOR.generate(make_result("REQUEST_REFUND", "NEUTRAL"))
 
     assert reply["response_type"] == "CLARIFICATION"
+    assert_natural_hinglish(reply["response"])
     assert "order ID" in reply["response"]
-    assert not re.search(r"\b(refund of|refunded|amount of)\b", reply["response"], re.I)
+    assert "refund" in reply["response"].lower()
 
 
 def test_case_6_request_escalate():
@@ -119,36 +152,54 @@ def test_case_6_request_escalate():
 
     assert reply["response_type"] == "ESCALATION"
     assert reply["requires_human"] is True
-    assert "escalating" in reply["response"].lower()
+    assert_natural_hinglish(reply["response"])
+    assert "escalate" in reply["response"].lower()
 
 
-def test_case_7_feedback_positive():
-    reply = GENERATOR.generate(make_result("FEEDBACK_POSITIVE", "POSITIVE"))
-
-    assert reply["response_type"] == "APPRECIATION"
-    assert reply["requires_human"] is False
-    assert "thank you" in reply["response"].lower()
-
-
-def test_case_8_feedback_negative():
-    result = make_result("FEEDBACK_NEGATIVE", "NEGATIVE")
-    reply = GENERATOR.generate(result)
-
-    assert result["priority"]["label"] == "HIGH"
-    assert reply["requires_human"] is True
-    assert "sorry" in reply["response"].lower()
-
-
-def test_case_9_request_callback():
+def test_case_7_request_callback():
     reply = GENERATOR.generate(make_result("REQUEST_CALLBACK", "NEUTRAL"))
 
     # CALLBACK wins over ESCALATION even though routing forces a human.
     assert reply["response_type"] == "CALLBACK"
     assert reply["requires_human"] is True
-    assert "callback" in reply["response"].lower()
+    assert_natural_hinglish(reply["response"])
+    assert "call" in reply["response"].lower()
 
 
-def test_case_10_context_dependent_refund_query():
+def test_case_8_feedback_positive():
+    reply = GENERATOR.generate(make_result("FEEDBACK_POSITIVE", "POSITIVE"))
+
+    assert reply["response_type"] == "APPRECIATION"
+    assert reply["requires_human"] is False
+    assert_natural_hinglish(reply["response"])
+    assert "thank you" in reply["response"].lower()
+    assert "feedback" in reply["response"].lower()
+
+
+def test_case_9_feedback_negative():
+    result = make_result("FEEDBACK_NEGATIVE", "NEGATIVE")
+    reply = GENERATOR.generate(result)
+
+    assert result["priority"]["label"] == "HIGH"
+    assert reply["requires_human"] is True
+    assert_natural_hinglish(reply["response"])
+    assert "sorry" in reply["response"].lower()
+    assert "feedback" in reply["response"].lower()
+
+
+def test_case_10_query_product_info():
+    reply = GENERATOR.generate(
+        make_result("QUERY_PRODUCT_INFO", "NEUTRAL", [slot("PRODUCT_NAME", "iPhone 15")])
+    )
+
+    assert reply["response_type"] == "INFORMATION"
+    assert reply["requires_human"] is False
+    assert_natural_hinglish(reply["response"])
+    assert "iPhone 15" in reply["response"]
+    assert "product" in reply["response"].lower()
+
+
+def test_case_11_context_dependent_refund_query():
     """Turn 2 of the cancel -> refund conversation, with the order id carried in."""
     reply = GENERATOR.generate(make_result(
         "QUERY_REFUND_STATUS", "NEUTRAL",
@@ -159,12 +210,54 @@ def test_case_10_context_dependent_refund_query():
         message="Refund kab milega?",
     ))
 
+    assert_natural_hinglish(reply["response"])
     assert "#45231" in reply["response"]
-    assert "earlier message" in reply["response"]
+    assert "pichhle message" in reply["response"]
     assert reply["response_type"] == "INFORMATION"   # nothing left to clarify
-    # Still no invented refund date.
-    assert not re.search(r"\b(days|weeks|hours|tomorrow|by \w+day)\b",
-                         reply["response"], re.I)
+
+
+def test_case_12_high_priority():
+    reply = GENERATOR.generate(make_result("COMPLAINT_DELIVERY", "NEGATIVE"))
+
+    assert reply["requires_human"] is True
+    assert_natural_hinglish(reply["response"])
+    assert "high priority" in reply["response"].lower()
+    assert "human support agent" in reply["response"].lower()
+
+
+def test_case_13_medium_priority():
+    result = make_result("REQUEST_CANCEL", "NEUTRAL", [slot("ORDER_ID", "#45231")])
+    reply = GENERATOR.generate(result)
+
+    assert result["priority"]["label"] == "MEDIUM"
+    assert reply["requires_human"] is False
+    assert_natural_hinglish(reply["response"])
+    assert "support team" in reply["response"].lower()
+    assert "high priority" not in reply["response"].lower()
+
+
+def test_case_14_low_priority():
+    result = make_result("FEEDBACK_POSITIVE", "POSITIVE")
+    reply = GENERATOR.generate(result)
+
+    assert result["priority"]["label"] == "LOW"
+    assert reply["requires_human"] is False
+    assert_natural_hinglish(reply["response"])
+    assert "yahin" in reply["response"].lower()
+
+
+def test_case_15_partial_slot():
+    """The model's known failure mode: AMOUNT = 'rupaye' with the number dropped."""
+    reply = GENERATOR.generate(make_result(
+        "PAYMENT_ISSUE", "NEGATIVE", [slot("AMOUNT", "rupaye")],
+        message="Payment 799 rupaye cut ho gayi but order show nahi ho raha",
+    ))
+
+    assert "799" not in reply["response"]          # never repaired from the message
+    assert "amount rupaye" not in reply["response"].lower()
+    assert_natural_hinglish(reply["response"])
+    assert "payment" in reply["response"].lower()  # still useful
+    assert len(reply["response"]) > 60
 
 
 # --- coverage and shape ------------------------------------------------------
@@ -183,8 +276,7 @@ def test_every_intent_sentiment_pair_produces_a_valid_reply(intent, sentiment):
     assert isinstance(reply["response"], str) and len(reply["response"]) > 30
     assert reply["response_type"] in RESPONSE_TYPES
     assert isinstance(reply["requires_human"], bool)
-    assert reply["response"] == reply["response"].strip()
-    assert "  " not in reply["response"]
+    assert_natural_hinglish(reply["response"])
 
 
 def test_generation_is_deterministic():
@@ -196,7 +288,7 @@ def test_unknown_intent_falls_back():
     reply = GENERATOR.generate(make_result("NOT_A_REAL_INTENT", "NEUTRAL"))
 
     assert reply["response_type"] in ("FALLBACK", "CLARIFICATION", "ESCALATION")
-    assert reply["response"]
+    assert_natural_hinglish(reply["response"])
 
 
 def test_missing_blocks_do_not_crash():
@@ -211,47 +303,31 @@ def test_tone_tracks_sentiment():
     neutral = GENERATOR.generate(make_result("QUERY_ORDER_STATUS", "NEUTRAL"))["response"]
     positive = GENERATOR.generate(make_result("FEEDBACK_POSITIVE", "POSITIVE"))["response"]
 
-    assert "sorry" in negative.lower()
-    assert "thanks" in neutral.lower()
-    assert "thank you" in positive.lower()
+    assert negative.startswith(SENTIMENT_OPENERS["NEGATIVE"])    # "Sorry, ..."
+    assert neutral.startswith(ACKNOWLEDGEMENT_LEADS["NEUTRAL"])  # "Samajh gaya, ..."
+    assert positive.startswith(ACKNOWLEDGEMENT_LEADS["POSITIVE"])  # "Thank you, ..."
     assert negative != neutral
 
-
-def test_high_priority_uses_the_urgent_opener_and_mentions_escalation():
-    reply = GENERATOR.generate(make_result("COMPLAINT_DELIVERY", "NEGATIVE"))
-
-    assert URGENT_OPENERS["NEGATIVE"] in reply["response"]
-    assert "high priority" in reply["response"].lower()
+    # Neutral and positive turns carry no apology at all.
+    assert "sorry" not in neutral.lower()
+    assert "sorry" not in positive.lower()
 
 
-def test_low_priority_offers_self_service():
-    reply = GENERATOR.generate(make_result("FEEDBACK_POSITIVE", "POSITIVE"))
-
-    assert SENTIMENT_OPENERS["POSITIVE"] in reply["response"]
-    assert "right here" in reply["response"].lower()
+def test_apologies_are_not_overused():
+    """One "sorry" per reply, not a pile of them."""
+    for intent in INTENT_STRATEGIES:
+        response = GENERATOR.generate(make_result(intent, "NEGATIVE"))["response"]
+        assert response.lower().count("sorry") <= 1, response
 
 
 # --- anti-hallucination ------------------------------------------------------
-
-def test_partial_amount_slot_is_not_quoted():
-    """The model's known failure mode: AMOUNT = 'rupaye' with the number dropped."""
-    reply = GENERATOR.generate(make_result(
-        "PAYMENT_ISSUE", "NEGATIVE", [slot("AMOUNT", "rupaye")],
-        message="Payment 799 rupaye cut ho gayi but order show nahi ho raha",
-    ))
-
-    assert "799" not in reply["response"]          # never repaired from the message
-    assert "amount rupaye" not in reply["response"].lower()
-    assert "payment" in reply["response"].lower()  # still useful
-    assert len(reply["response"]) > 60
-
 
 def test_partial_order_id_slot_is_not_quoted():
     reply = GENERATOR.generate(make_result("COMPLAINT_DELIVERY", "NEGATIVE",
                                            [slot("ORDER_ID", "order")]))
 
     assert "order ID order" not in reply["response"]
-    assert "Could you share your order ID" in reply["response"]
+    assert INTENT_STRATEGIES["COMPLAINT_DELIVERY"].ask in reply["response"]
 
 
 def test_complete_slots_are_quoted_verbatim():
@@ -262,14 +338,15 @@ def test_complete_slots_are_quoted_verbatim():
 
     assert "#AB12CD" in reply["response"]
     assert "5 din" in reply["response"]
+    assert "aur" in reply["response"]   # two slots joined naturally
 
 
 def test_no_template_contains_a_digit():
     """Any number in a reply must have come from a slot, not from a template."""
-    templates = list(SENTIMENT_OPENERS.values()) + list(URGENT_OPENERS.values())
+    templates = list(SENTIMENT_OPENERS.values()) + list(ACKNOWLEDGEMENT_LEADS.values())
     for strategy in INTENT_STRATEGIES.values():
-        templates += [strategy.summary, strategy.action, strategy.ask]
-    for closer_args in ((("HIGH", True)), ("MEDIUM", True), ("MEDIUM", False), ("LOW", False)):
+        templates += [strategy.acknowledgement, strategy.action, strategy.ask]
+    for closer_args in (("HIGH", True), ("MEDIUM", True), ("MEDIUM", False), ("LOW", False)):
         templates.append(ResponseGenerator._closer(*closer_args))
 
     offenders = [t for t in templates if re.search(r"\d", t or "")]
@@ -288,7 +365,7 @@ def test_no_invented_numbers(intent):
 
 
 @pytest.mark.parametrize("intent", sorted(INTENT_STRATEGIES))
-def test_never_states_status_dates_or_outcomes(intent):
+def test_never_states_status_dates_or_outcomes_in_english(intent):
     forbidden = re.compile(
         r"\b(delivered on|will arrive|arriving on|has been refunded|refund of|"
         r"credited to|tracking (id|number) is|your balance|policy states|"
@@ -300,11 +377,45 @@ def test_never_states_status_dates_or_outcomes(intent):
         assert not forbidden.search(response), f"{intent}/{sentiment}: {response}"
 
 
+@pytest.mark.parametrize("intent", sorted(INTENT_STRATEGIES))
+def test_never_states_status_dates_or_outcomes_in_hinglish(intent):
+    """The Hinglish equivalents of every claim the English guard blocks.
+
+    Switching language must not open a hole in the safety net: a template could
+    now promise an outcome in Hindi that the English regex would never catch.
+    """
+    forbidden = re.compile(
+        r"(refund (ho gaya|ho chuka|aa gaya|mil gaya|kar diya)|"
+        r"deliver (ho gaya|ho jayega|ho chuka)|"
+        r"credit (ho gaya|ho jayega|kar diya)|"
+        r"paise (aa jayenge|aa gaye|mil jayenge)|"
+        r"cancel (ho gaya|ho chuka|kar diya gaya)|"
+        r"\bkal tak\b|\baaj tak\b|\bghante mein\b|\bdin mein\b|\bhafte mein\b|"
+        r"\bticket (raise|create) (kar|ho)|"
+        r"\bagent assign\b|\bpolicy ke hisaab se\b)",
+        re.I,
+    )
+    for sentiment in ("NEGATIVE", "NEUTRAL", "POSITIVE"):
+        response = GENERATOR.generate(make_result(intent, sentiment))["response"]
+        assert not forbidden.search(response), f"{intent}/{sentiment}: {response}"
+
+
+def test_routing_language_does_not_claim_a_ticket():
+    """The system routes; it does not raise tickets. Replies must not say it does."""
+    for intent in INTENT_STRATEGIES:
+        for sentiment in ("NEGATIVE", "NEUTRAL", "POSITIVE"):
+            response = GENERATOR.generate(make_result(intent, sentiment))["response"].lower()
+            assert "ticket raise" not in response
+            assert "ticket create" not in response
+            assert "ticket number" not in response
+            assert "agent assign" not in response
+
+
 def test_asks_for_detail_when_nothing_useful_was_extracted():
     reply = GENERATOR.generate(make_result("QUERY_ORDER_STATUS", "NEUTRAL"))
 
     assert reply["response_type"] == "CLARIFICATION"
-    assert "?" in reply["response"]
+    assert "?" in reply["response"] or "please" in reply["response"].lower()
 
 
 def test_does_not_ask_when_the_detail_is_already_present():
@@ -312,7 +423,7 @@ def test_does_not_ask_when_the_detail_is_already_present():
                                            [slot("ORDER_ID", "#45231")]))
 
     assert reply["response_type"] == "INFORMATION"
-    assert "Could you share your order ID?" not in reply["response"]
+    assert INTENT_STRATEGIES["QUERY_ORDER_STATUS"].ask not in reply["response"]
 
 
 def test_inherited_slots_only_count_when_context_was_used():
@@ -339,6 +450,7 @@ def test_end_to_end_on_the_real_pipeline(pipeline, session_id):
     assert result["nlu"]["intent"] == "PAYMENT_ISSUE"
     assert reply["requires_human"] is True
     assert reply["response_type"] == "ESCALATION"
+    assert_natural_hinglish(reply["response"])
     # The model returns AMOUNT="rupaye" here, so the number must not appear.
     assert "799" not in reply["response"]
 
@@ -349,5 +461,14 @@ def test_end_to_end_context_conversation(pipeline, session_id):
     reply = GENERATOR.generate(turn_2)
 
     assert turn_2["context"]["used"] is True
+    assert_natural_hinglish(reply["response"])
     assert "#45231" in reply["response"]
     assert reply["requires_human"] is False
+
+
+def test_end_to_end_english_input_still_answers_in_hinglish(pipeline, session_id):
+    """Input language does not switch the reply language - it stays Hinglish."""
+    result = pipeline.process_message(session_id, "Can you tell me my order status?")
+    reply = GENERATOR.generate(result)
+
+    assert_natural_hinglish(reply["response"])
