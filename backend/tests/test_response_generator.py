@@ -15,10 +15,9 @@ import pytest
 
 from backend.priority.priority_engine import predict_priority
 from backend.response.response_generator import (
-    ACKNOWLEDGEMENT_LEADS,
     INTENT_STRATEGIES,
+    FRUSTRATED_OPENER,
     RESPONSE_TYPES,
-    SENTIMENT_OPENERS,
     ResponseGenerator,
 )
 
@@ -39,6 +38,8 @@ def make_result(
     context_used: bool = False,
     inherited: Optional[List[Dict[str, Any]]] = None,
     message: str = "test message",
+    sentiment_confidence: float = 0.99,
+    rules_fired: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build a pipeline-shaped result, scoring priority with the real engine."""
     slots = slots or []
@@ -52,7 +53,7 @@ def make_result(
             "intent": intent,
             "intent_confidence": 0.99,
             "sentiment": sentiment,
-            "sentiment_confidence": 0.99,
+            "sentiment_confidence": sentiment_confidence,
             "slots": slots,
         },
         "context": {
@@ -65,6 +66,7 @@ def make_result(
             "score": priority["priority_score"],
             "routing": priority["routing"],
             "reason": priority["reason"],
+            "rules_fired": priority["rules_fired"] if rules_fired is None else rules_fired,
         },
     }
 
@@ -212,7 +214,7 @@ def test_case_11_context_dependent_refund_query():
 
     assert_natural_hinglish(reply["response"])
     assert "#45231" in reply["response"]
-    assert "pichhle message" in reply["response"]
+    assert "hai na?" in reply["response"]          # confirmed, not assumed
     assert reply["response_type"] == "INFORMATION"   # nothing left to clarify
 
 
@@ -221,8 +223,8 @@ def test_case_12_high_priority():
 
     assert reply["requires_human"] is True
     assert_natural_hinglish(reply["response"])
-    assert "high priority" in reply["response"].lower()
-    assert "human support agent" in reply["response"].lower()
+    assert "urgent" in reply["response"].lower()
+    assert "koi team member" in reply["response"].lower()
 
 
 def test_case_13_medium_priority():
@@ -232,8 +234,8 @@ def test_case_13_medium_priority():
     assert result["priority"]["label"] == "MEDIUM"
     assert reply["requires_human"] is False
     assert_natural_hinglish(reply["response"])
-    assert "support team" in reply["response"].lower()
-    assert "high priority" not in reply["response"].lower()
+    assert "urgent" not in reply["response"].lower()
+    assert "team ko bhej" not in reply["response"].lower()   # no closer when no human
 
 
 def test_case_14_low_priority():
@@ -243,7 +245,7 @@ def test_case_14_low_priority():
     assert result["priority"]["label"] == "LOW"
     assert reply["requires_human"] is False
     assert_natural_hinglish(reply["response"])
-    assert "yahin" in reply["response"].lower()
+    assert "team ko bhej" not in reply["response"].lower()
 
 
 def test_case_15_partial_slot():
@@ -301,16 +303,52 @@ def test_missing_blocks_do_not_crash():
 def test_tone_tracks_sentiment():
     negative = GENERATOR.generate(make_result("QUERY_ORDER_STATUS", "NEGATIVE"))["response"]
     neutral = GENERATOR.generate(make_result("QUERY_ORDER_STATUS", "NEUTRAL"))["response"]
-    positive = GENERATOR.generate(make_result("FEEDBACK_POSITIVE", "POSITIVE"))["response"]
+    positive = GENERATOR.generate(make_result("QUERY_ORDER_STATUS", "POSITIVE"))["response"]
 
-    assert negative.startswith(SENTIMENT_OPENERS["NEGATIVE"])    # "Sorry, ..."
-    assert neutral.startswith(ACKNOWLEDGEMENT_LEADS["NEUTRAL"])  # "Samajh gaya, ..."
-    assert positive.startswith(ACKNOWLEDGEMENT_LEADS["POSITIVE"])  # "Thank you, ..."
-    assert negative != neutral
+    assert negative.lower().startswith("sorry")
+    assert len({negative, neutral, positive}) == 3
 
     # Neutral and positive turns carry no apology at all.
     assert "sorry" not in neutral.lower()
     assert "sorry" not in positive.lower()
+
+
+@pytest.mark.parametrize("intent", sorted(INTENT_STRATEGIES))
+def test_each_intent_words_each_sentiment_differently(intent):
+    replies = INTENT_STRATEGIES[intent].replies
+    assert set(replies) == {"NEGATIVE", "NEUTRAL", "POSITIVE"}
+    assert len(set(replies.values())) == 3
+
+
+def test_repeat_frustration_gets_stronger_empathy():
+    result = make_result("QUERY_REFUND_STATUS", "NEGATIVE",
+                         rules_fired=[{"rule": "sustained_negative"}])
+    reply = GENERATOR.generate(result)["response"]
+    assert reply.startswith(FRUSTRATED_OPENER)
+    assert reply.lower().count("sorry") == 1
+    assert_natural_hinglish(reply)
+
+
+def test_unsure_sentiment_replies_neutrally():
+    reply = GENERATOR.generate(
+        make_result("QUERY_ORDER_STATUS", "NEGATIVE", sentiment_confidence=0.4)
+    )["response"]
+    assert "sorry" not in reply.lower()
+
+
+def test_unrelated_carried_over_slots_are_not_mentioned():
+    reply = GENERATOR.generate(make_result(
+        "FEEDBACK_POSITIVE", "POSITIVE", context_used=True,
+        inherited=[{"type": "ORDER_ID", "value": "#45231", "source": "context"}],
+    ))["response"]
+    assert "#45231" not in reply
+
+
+@pytest.mark.parametrize("intent", sorted(INTENT_STRATEGIES))
+def test_replies_are_short(intent):
+    """Worst case - negative, HIGH, needs a detail - still stays brief."""
+    reply = GENERATOR.generate(make_result(intent, "NEGATIVE"))["response"]
+    assert len(reply) <= 260, f"{intent}: {len(reply)} chars: {reply}"
 
 
 def test_apologies_are_not_overused():
@@ -343,9 +381,9 @@ def test_complete_slots_are_quoted_verbatim():
 
 def test_no_template_contains_a_digit():
     """Any number in a reply must have come from a slot, not from a template."""
-    templates = list(SENTIMENT_OPENERS.values()) + list(ACKNOWLEDGEMENT_LEADS.values())
+    templates = [FRUSTRATED_OPENER]
     for strategy in INTENT_STRATEGIES.values():
-        templates += [strategy.acknowledgement, strategy.action, strategy.ask]
+        templates += list(strategy.replies.values()) + [strategy.ask]
     for closer_args in (("HIGH", True), ("MEDIUM", True), ("MEDIUM", False), ("LOW", False)):
         templates.append(ResponseGenerator._closer(*closer_args))
 

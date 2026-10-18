@@ -310,7 +310,7 @@ Omit `session_id` and one is created and returned.
 {
   "session_id": "abc", "message": "...", "nlu": {...}, "context": {...}, "priority": {...},
 
-  "response": "I'm really sorry about this, and I understand it needs urgent attention. I understand that your payment didn't go through the way it should have. We can help you check the payment and the order status, and get a deducted or failed payment traced. Could you share the order ID and the payment or UPI reference from your bank? I've marked this as high priority and a support specialist will pick it up.",
+  "response": "Sorry, paise atak jaayein to tension hona normal hai. Main abhi aapki payment trace karta hoon. Order ID aur UPI ya bank reference bhej denge? Maine ise urgent mark karke team ko bhej diya hai, koi team member khud dekhega.",
   "response_type": "ESCALATION",
   "requires_human": true
 }
@@ -326,10 +326,14 @@ Omit `session_id` and one is created and returned.
 **deterministic and template-based**: no model call, no external LLM, no randomness. The
 same input always produces the same output.
 
-All 15 intents have their own strategy (what we understood, what support can do, which
-details would help, what to ask when they are missing). Tone follows sentiment — empathetic
-for `NEGATIVE`, professional for `NEUTRAL`, appreciative for `POSITIVE` — and the closing
-line follows priority, with `HIGH` acknowledging urgency and naming the handoff.
+Replies are short (1–4 brief sentences). Each of the 15 intents has its own one-line reply
+**per sentiment**, so a negative refund query and a neutral one are worded differently, not
+just prefixed with "Sorry". Each negative line carries its own intent-specific apology;
+when the priority engine fired `repeated_intent` or `sustained_negative`, a
+"baar baar bolna pad raha hai" line is added in front. A sentiment prediction below 0.6
+confidence is answered neutrally. Details carried over from earlier turns are mentioned
+only when the intent uses them, and as a check ("Ye order ID #45231 ke baare mein hai na?").
+A closing handoff line appears only when a human is involved.
 
 `response_type` is one of `ESCALATION`, `CALLBACK`, `CLARIFICATION`, `ACTION_CONFIRMATION`,
 `ACKNOWLEDGEMENT`, `INFORMATION`, `APPRECIATION`, `APOLOGY`, `FALLBACK`, resolved in that
